@@ -7,6 +7,9 @@ default: help
 	pull_or_build_if_changed push push_if_changed rebuild-all rmi run test \
 	test-dind usershell
 
+# Test-Kitchen provider
+KITCHEN_PROVIDER ?= docker
+
 # Normal account inside container
 DOCKER_USER ?= dev
 DOCKER_USER_UID ?= 8888
@@ -40,7 +43,7 @@ PROJECT_OWNER ?= ${DOCKER_USERNAME}
 WORKING_DIR ?= /src/${PROJECT_NAME}
 
 # Writable stuff inside container
-WRITABLE_DIRECTORIES := .bundle
+WRITABLE_DIRECTORIES := .bundle .kitchen
 WRITABLE_FILES := Gemfile.lock
 
 # Define Docker build tag to project name if not set
@@ -73,8 +76,9 @@ BUILD_ARGS = \
 # Docker run environment variables
 ENV_VARS = \
 	--env 'BUNDLE_DISABLE_SHARED_GEMS=true' \
+	--env "BUNDLE_JOBS=${NB_PROC}" \
 	--env "BUNDLE_PATH=${WORKING_DIR}/.bundle" \
-	--env "MAKEFLAGS=-j ${NB_PROC}" \
+	--env "KITCHEN_PROVIDER=${KITCHEN_PROVIDER}" \
 	--env "MAKEFLAGS=-j ${NB_PROC}" \
 	--env container=docker \
 	--env LC_ALL=C.UTF-8
@@ -354,11 +358,6 @@ help: ## Show this help
 	| sort \
 	| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n",$$1,$$2}'
 
-idempotency: ## Test (bundle call) idempotency
-	+make --no-print-directory bundle \
-		&& make --no-print-directory run \
-		&& test "$$(make --no-print-directory run | wc -l)" = 4
-
 info: MAKEFLAGS =
 info: .build .acl_build ## Show Docker version and user id
 	@if [ -n "$(DOCKER_SUDO_S)" ]; then \
@@ -369,6 +368,9 @@ info: .build .acl_build ## Show Docker version and user id
 	fi
 	@$(call docker_run,,id)
 	@$(call docker_run,,ruby --version)
+
+kitchen: bundle ## Run kitchen tests
+	@$(call docker_run,${WRITABLE_VOLUMES_ARGS},bundle exec kitchen test)
 
 login: ## Login to Docker registry
 	@echo "login to registry $(DOCKER_USERNAME) @ ${DOCKER_REGISTRY}"
@@ -418,9 +420,6 @@ rebuild-all: ## Clobber all, build and run test
 	@make --no-print-directory clobber
 	@make --no-print-directory test
 
-run: bundle ## Run rake --version
-	@$(call docker_run,${WRITABLE_VOLUMES_ARGS},rake --version)
-
 test-dind: .build .acl_build ## Run 'docker run hello-world' within image
 	@if [ -n "$(DOCKER_SUDO_S)" ]; then \
 		printf "${DOCKER_USER}\n\n" \
@@ -433,7 +432,7 @@ test: MAKEFLAGS =
 test: .build .acl_build ## Test (CI)
 	@make --no-print-directory info
 	@make --no-print-directory test-dind
-	@make --no-print-directory idempotency
+	@make --no-print-directory kitchen
 
 usershell: .build .acl_build ## Run user shell
 	@$(call docker_run,-it --env SHELL=/bin/bash $(RC_ENV_VARS),/bin/bash --login)

@@ -15,9 +15,9 @@ Sharing a common [Ansible](https://github.com/ansible/ansible) Provisioning with
 [Test Kitchen](https://github.com/test-kitchen/test-kitchen) container
 for a remote Linux/OsX team and keep most of test & CI code in repository:
 
-* [ ] Ansible based provisioning
+* [x] Ansible based provisioning
 * [ ] [Password-Store](https://github.com/test-kitchen/test-kitchen) for credentials management
-* [ ] Testable provisioning with **Test-Kitchen**
+* [x] Testable provisioning with **Test-Kitchen**
 * [x] Bundler friendly (mounted `.bundle` with proper rights)
 * [x] custom Ruby version via `.ruby-version` file
 * [x] Debian based container
@@ -39,15 +39,14 @@ targets:
   clean           Remove writable directories
   clobber         Do clean, rmi, remove backup (*~) files
   help            Show this help
-  idempotency     Test (bundle call) idempotency
   info            Show Docker version and user id
+  kitchen         Run kitchen tests
   login           Login to Docker registry
   logout          Logout from Docker registry
   pull            Run 'docker pull' with image
   push            Run 'docker push' with image
   rebuild-all     Clobber all, build and run test
   rmi             Remove project container
-  run             Run main.rb
   test-dind       Run 'docker run hello-world' within image
   test            Test (CI)
   usershell       Run user shell
@@ -77,6 +76,7 @@ targets:
 | `DOCKER_USER` | `dev` | Y | Y (`USER`) | normal account `login` inside container |
 | `GITLAB_CI` | | N | Y (if defined) | Gitlab CI flag |
 | `HTTP_PROXY` | | Y (if defined) | Y (if defined) | HTTP proxy cache URL |
+| `KITCHEN_PROVIDER` | `docker` | N | Y | Test-Kitchen provider |
 | `MAKEFLAGS` | | N | Y (if defined) | GNU make flags |
 | `NB_PROC` | `$(nproc)` (Linux) or `sysctl -n hw.ncpu` (OsX) | Y | Y | Processor count |
 | `PROJECT_NAME` | `$(basename $(pwd))` | N | Y (`hostname`) | Container build tag project name part (`user_name/project_name:branch`) / container hostname |

@@ -49,6 +49,7 @@ procps \
 rsync \
 ruby \
 ruby-dev \
+ssh \
 sudo \
 tmate \
 tmux \
@@ -187,6 +188,7 @@ RUN echo "deb ${DEB_DOCKER_URL} ${DEB_DIST} stable" \
          >> /etc/apt/apt.conf.d/11http-proxy; fi \
   && apt-get update \
   && apt-get install --no-install-recommends -y docker-ce \
+  && apt install --no-install-recommends -y "ansible/${DEB_DIST}-backports" \
   && apt-get -y autoremove \
   && apt-get clean \
   && if [ -f /etc/apt/apt.conf.d/11http-proxy ]; then \

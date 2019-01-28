@@ -1,0 +1,98 @@
+---
+<%
+  SYSTEMCTL_REPLACEMENT_URL = \
+   "https://raw.githubusercontent.com/gdraheim/docker-systemctl-replacement\
+/master/files/docker/systemctl.py"
+
+  SSHD_OPTS = %w[
+    -o UseDNS=no
+    -o UsePAM=no
+    -o PasswordAuthentication=yes
+    -o UsePrivilegeSeparation=no
+    -o PidFile=/tmp/sshd.pid
+  ]
+
+  require_relative 'kitchen_docker_monkey_patches'
+%>
+driver:
+  name: docker
+  require_chef_omnibus: false
+  platform: debian
+  image: debian:stretch
+  use_sudo: false
+  <% if ENV.key?('HTTP_PROXY') %>http_proxy: <%= ENV['HTTP_PROXY'] %><% end %>
+  <% if ENV.key?('HTTP_PROXY') %>https_proxy: <%= ENV['HTTP_PROXY'] %><% end %>
+  run_options:
+    env: container=docker
+    stop-signal: SIGRTMIN+3
+  run_command: /bin/systemctl start ssh
+  provision_command:
+    - DEBIAN_FRONTEND=noninteractive apt-get update
+      && dpkg-divert --local /bin/systemctl
+      && apt-get -y install ca-certificates
+                            curl
+                            openssh-server
+                            python
+                            python-apt
+                            systemd
+      && apt-get clean
+      && apt-get -y autoremove
+      && curl -q -o /tmp/systemctl <%= SYSTEMCTL_REPLACEMENT_URL %>
+      && install -o root -g root -m 0755 /tmp/systemctl /bin/systemctl
+      && rm -rf /tmp/* /var/tmp/*
+      && find /etc/systemd/system /lib/systemd/system
+              -path '*.wants/*'
+              -not -name '*journald*'
+              -not -name '*dbus*'
+              -not -name '*ssh*'
+              -not -name '*pwr*'
+              -not -name '*systemd-tmpfiles*'
+              -not -name '*systemd-user-sessions*'
+              -exec rm \{} \;
+      && sed -e 's|^\(SSHD_OPTS=\).*$|\1"<%= SSHD_OPTS.join(' ') %>"|'
+             -ri /etc/default/ssh
+      && systemctl enable ssh
+      && systemctl start ssh
+  # https://github.com/test-kitchen/kitchen-docker/pull/294
+  build_tempdir: .kitchen
+  # https://github.com/test-kitchen/kitchen-docker/pull/283
+  use_internal_docker_network: true
+
+provisioner:
+  name: ansible_push
+  playbook: site.yml
+  sudo: true
+  sudo_user: root
+  ask_vault_pass: false
+  idempotency_test: true
+  fail_non_idempotent: true
+  chef_bootstrap_url: nil
+
+platforms:
+  - name: debian-stretch
+
+suites:
+  - name: default
+    provisioner:
+      custom_instance_name: default-sandbox.local
+      extra_vars:
+        ansible_fqdn: default-sandbox.local
+    verifier:
+      inspec_tests:
+        - sshd_spec.rb
+
+transport:
+  username: <%= ENV['KITCHEN_USERNAME'] %>
+  port: <%= ENV['KITCHEN_PORT'] %>
+  backend: ssh
+  keepalive: true
+  compression: false
+  verify_host_key: never
+  verbose: warn
+  keys_only: true
+  request_pty: false
+  timeout: 3
+  non_interactive: true
+
+verifier:
+  name: inspec

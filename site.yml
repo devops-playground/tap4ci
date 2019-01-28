@@ -1,0 +1,12 @@
+--- 
+- name: main site file
+  hosts: all
+
+  gather_facts: No
+
+  tasks:
+    - debug:
+        var: ansible_ssh_user
+    - debug:
+        var: ansible_fqdn
+...
