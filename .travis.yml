@@ -1,0 +1,45 @@
+--- 
+env:
+  global:
+    - DOCKER_USERNAME: vallar
+    # DOCKER_PASSWORD
+    - secure: JwWsPY0IGmY3eHB0M7UaIsOiEv+a+RExY4plH1a227g3eA9pVj0Kn7jHWyGEPLcRt6aEj9E8G0ZS9HgexQ2UpYI/ZzgsvENqgML6tPJC9CdRz5Zc64P2va94j2AeBWb1Wg9WBry7sTOGKsjzliXSfyOuY6cF6EIpy/jMqMRjIpJazZUwEGzKaL4ceoBjvqPM2k0kaWcbIr+0dK8I6HcwyUr+MfARw7kKAb/GXxuu3aIcf/7Db8ZZP4xBiTCCcP0PgX2+4xkr/T0hCpYlo3ibkp79eZyCkfWwntDMzgyZGLW3xWa0OTxBGEAymScWwnZv+PMw15BElXBYuYqk2RUQAgVyZfr9F8n36Z+dpyNReUexF5InFcKpdtk0Cj3p4BT0JRLBD6HzEl4JaIf9Tqd44ZKbW3zpjoK+J4+iAMsmNxTARFv2dFkE7ErcCY3X9eJlr4vFyIuJSICQdTojVtCY09koVua+AUhPZXVnFxp5Mi1krlwLqXXy4Lf19z/zPAaHV6C4Ho2LR/4ETsLDeMDBTfAq0MUtnA0RO17LqbVjwmL5OSXJnFwMG3S9kSHtFklLk+KwWLaDtmiyDpuXEhBI5rkj2l0P/nQyQFeAI78iqFNPJ44N3nIL6/EaV5//ZyZeJpfnK6z+asLPd9Fhbt2TIYD8DlEcxVcQLrkQPH4xT7o=
+
+sudo: required
+
+dist: xenial
+
+language: ruby
+
+services:
+  - docker
+
+before_install:
+  - sudo apt-add-repository
+    "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+  - sudo apt-get update -q
+  - sudo apt-get install -o Dpkg::Options::="--force-confold" -y -q docker-ce
+  - git checkout ${TRAVIS_BRANCH}
+  - git branch -u origin/${TRAVIS_BRANCH}
+  - git config branch.${TRAVIS_BRANCH}.remote origin
+  - git config branch.${TRAVIS_BRANCH}.merge refs/heads/${TRAVIS_BRANCH}
+  - git config --unset remote.origin.fetch
+  - git config --add remote.origin.fetch +refs/heads/*:refs/remotes/origin/*
+  - git fetch origin master
+  - make pull_or_build_if_changed
+  - make push
+
+script:
+  - make pull
+  - make clean
+  - docker info
+  - id
+  # Avoid "You must use Bundler 2 or greater with this lockfile." error
+  - git checkout Gemfile.lock
+  - make bundle
+  - make run
+  - make test
+
+after_success:
+  - make pull_then_push_to_latest
+... 

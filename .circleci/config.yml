@@ -1,0 +1,103 @@
+---
+version: 2
+
+common_environment: &common_environment
+  environment:
+    DOCKER_USERNAME: v41lzx
+    PROJECT_NAME: tap4ci
+    WORKING_DIR: /root/project
+
+docker_environment: &docker_environment
+  machine:
+    image: circleci/classic:201708-01
+    docker_layer_caching: true
+
+login_to_docker_registry: &login_to_docker_registry
+  run:
+    name: Login to Docker registry
+    command: make login
+
+fix_git_branches: &fix_git_branches
+  run:
+    name: Fix git branches
+    command: |
+      git checkout ${CIRCLE_BRANCH}
+      git branch -u origin/${CIRCLE_BRANCH}
+      git config branch.${CIRCLE_BRANCH}.remote origin
+      git config branch.${CIRCLE_BRANCH}.merge refs/heads/${CIRCLE_BRANCH}
+      git config --unset remote.origin.fetch
+      git config --add remote.origin.fetch +refs/heads/*:refs/remotes/origin/*
+      git fetch origin master
+
+jobs:
+  build:
+    <<: *common_environment
+    <<: *docker_environment
+    steps:
+      - checkout
+      - *fix_git_branches
+      - *login_to_docker_registry
+      - run:
+          name: Pull or build container if changed
+          command: make pull_or_build_if_changed
+      - run:
+          name: Push container
+          command: make push
+
+  test:
+    <<: *common_environment
+    <<: *docker_environment
+    steps:
+      - checkout
+      - *fix_git_branches
+      - *login_to_docker_registry
+      - run:
+          name: Pull container
+          command: make pull
+      - run:
+          name: Clean workspace
+          command: make clean
+      - run:
+          name: Show docker info
+          command: docker info
+      - run:
+          name: Show id
+          command: id
+      - run:
+          name: Run bundle
+          command: make bundle
+      - run:
+          name: Run
+          command: make run
+      - run:
+          name: Run test
+          command: make test
+
+  push:
+    <<: *common_environment
+    <<: *docker_environment
+    steps:
+      - checkout
+      - *fix_git_branches
+      - *login_to_docker_registry
+      - run:
+          name: Pull then push to latest container
+          command: make pull_then_push_to_latest
+
+workflows:
+  version: 2
+  build_and_test_then_push:
+    jobs:
+      - build
+      - test:
+          requires:
+            - build
+      - push:
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - bootstrap
+                - master
+...

@@ -1,0 +1,55 @@
+--- 
+image: docker:latest
+
+services:
+  - docker:dind
+
+stages:
+  - build
+  - test
+  - push
+
+variables:
+  DOCKER_PASSWORD: "${CI_REGISTRY_PASSWORD}"
+  DOCKER_REGISTRY: "${CI_REGISTRY}"
+  DOCKER_USERNAME: "${CI_REGISTRY_USER}"
+  PROJECT_NAME: "${CI_PROJECT_NAME}"
+  PROJECT_OWNER: "${GITLAB_USER_LOGIN}"
+  WORKING_DIR: "/builds/${GITLAB_USER_LOGIN}/${CI_PROJECT_NAME}"
+
+before_script:
+  - apk add acl bash git make openssh-client
+  - git checkout ${CI_COMMIT_REF_NAME}
+  - git branch -u origin/${CI_COMMIT_REF_NAME} || true
+  - git config branch.${CI_COMMIT_REF_NAME}.remote origin || true
+  - git config branch.${CI_COMMIT_REF_NAME}.merge refs/heads/${CI_COMMIT_REF_NAME} || true
+  - git config --unset remote.origin.fetch
+  - git config --add remote.origin.fetch +refs/heads/*:refs/remotes/origin/*
+  - git fetch origin master
+  - make login
+
+build:
+  stage: build
+  script:
+    - make pull_or_build_if_changed
+    - make push
+
+test:
+  stage: test
+  script:
+    - make pull
+    - make clean
+    - docker info
+    - id
+    - make bundle
+    - make run
+    - make test
+
+push:
+  stage: push
+  only:
+    - bootstrap
+    - master
+  script:
+    - make pull_then_push_to_latest
+... 
