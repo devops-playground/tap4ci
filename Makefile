@@ -334,17 +334,23 @@ bundle: .bundle_build ## Run bundle for project
 
 clean: FLAGS = acl_build bundle_build
 clean: clear-flags ## Remove writable directories
-	find . -type f -name \*~ -delete
-	rm -rf ${WRITABLE_DIRECTORIES} 2> /dev/null || ( \
-		printf "\033[31;1msudo rm -rf ${WRITABLE_DIRECTORIES}\033[0m\n" ; \
-		sudo rm -rf ${WRITABLE_DIRECTORIES} \
-	)
+	find ${PROJECT_ROOT}/. -type f -name \*~ -delete
+	for directory in ${WRITABLE_DIRECTORIES}; do \
+		rm -rf ${PROJECT_ROOT}/$${directory} 2> /dev/null || ( \
+			printf "\033[31;1msudo rm -rf $${directory}\033[0m\n" ; \
+			sudo rm -rf ${PROJECT_ROOT}/$${directory} \
+		) ; \
+	done
 
 clear-flags:
-	if [ -n "$(FLAG)" -a -f ".$(FLAG)" ]; then rm ".$(FLAG)"; fi
+	if [ -n "$(FLAG)" -a -f "${PROJECT_ROOT}/.$(FLAG)" ]; then \
+		rm "${PROJECT_ROOT}/.$(FLAG)"; \
+	fi
 	if [ -n "$(FLAGS)" ]; then \
 		for flag in $(FLAGS); do \
-		if [ -f ".$${flag}" ]; then rm ".$${flag}"; fi ; \
+			if [ -f "${PROJECT_ROOT}/.$${flag}" ]; then \
+				rm -f "${PROJECT_ROOT}/.$${flag}"; \
+			fi ; \
 		done ; \
 	fi
 
