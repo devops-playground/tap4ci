@@ -321,7 +321,7 @@ endif
 	touch .acl_build
 
 build: .build ## Build project container
-.build: Dockerfile
+.build: Dockerfile .bash_profile
 	docker build --rm $(BUILD_OPTS) $(BUILD_ARGS) -t $(DOCKER_BUILD_TAG) \
 		--cache-from $(DOCKER_BUILD_TAG) .
 	touch .build
