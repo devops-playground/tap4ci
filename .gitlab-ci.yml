@@ -42,7 +42,6 @@ test:
     - docker info
     - id
     - make bundle
-    - make run
     - make test
 
 push:

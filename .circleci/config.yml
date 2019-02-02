@@ -67,9 +67,6 @@ jobs:
           name: Run bundle
           command: make bundle
       - run:
-          name: Run
-          command: make run
-      - run:
           name: Run test
           command: make test
 

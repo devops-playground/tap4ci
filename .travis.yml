@@ -37,7 +37,6 @@ script:
   # Avoid "You must use Bundler 2 or greater with this lockfile." error
   - git checkout Gemfile.lock && rm -rf .bundle
   - make bundle
-  - make run
   - make test
 
 after_success:
