@@ -10,6 +10,9 @@ default: help
 # Test-Kitchen provider
 KITCHEN_PROVIDER ?= docker
 
+# Vagrant default provider
+VAGRANT_DEFAULT_PROVIDER ?= lxc
+
 # Normal account inside container
 DOCKER_USER ?= dev
 DOCKER_USER_UID ?= 8888
@@ -43,7 +46,7 @@ PROJECT_OWNER ?= ${DOCKER_USERNAME}
 WORKING_DIR ?= /src/${PROJECT_NAME}
 
 # Writable stuff inside container
-WRITABLE_DIRECTORIES := .bundle .kitchen
+WRITABLE_DIRECTORIES := .bundle .kitchen .kitchen_cache_directory
 WRITABLE_FILES := Gemfile.lock
 
 # Define Docker build tag to project name if not set
@@ -118,11 +121,13 @@ OVERRIDABLE_ENV_VARS := \
 	DOCKER_USERNAME \
 	GITLAB_CI \
 	HTTP_PROXY \
+	KITCHEN_PROVIDER \
 	MAKEFLAGS \
 	PROJECT_NAME \
 	PROJECT_OWNER \
 	TRAVIS \
 	TZ \
+	VAGRANT_DEFAULT_PROVIDER \
 	WORKING_DIR
 
 define add_to_env_vars
@@ -261,6 +266,12 @@ ifneq ($(RUBY_RELEASE),)
 	RUBIES_TARBALL_CACHE_BASE_URL ?= http://rubies.free.fr
 
 	RUBY_ROOT := /opt/rubies/ruby-$(RUBY_RELEASE)
+
+	OLD_GEM_ROOT := $(GEM_ROOT)
+	OLD_GEM_HOME := $(GEM_HOME)
+	OLD_GEM_PATH := $(GEM_PATH)
+	OLD_PATH := $(PATH)
+
 	GEM_ROOT := $(RUBY_ROOT)/lib/ruby/gems/$(RUBY_LEVEL)
 	GEM_HOME := $(BUNDLE_PATH)/gems
 	GEM_PATH := $(GEM_HOME):$(GEM_ROOT)
@@ -443,5 +454,14 @@ test: .build .acl_build ## Test (CI)
 	@make --no-print-directory test-dind
 	@make --no-print-directory kitchen
 
-usershell: .build .acl_build ## Run user shell
+lxctest: ## Test (CI) with LXC (without Docker-in-Docker)
+	@GEM_HOME=$(OLD_GEM_HOME) \
+		GEM_ROOT=$(OLD_GEM_ROOT) \
+		GEM_PATH=$(OLD_GEM_PATH) \
+		PATH=$(OLD_PATH) \
+		VAGRANT_DEFAULT_PROVIDER=lxc \
+		KITCHEN_PROVIDER=vagrant \
+		bundle exec kitchen test
+
+usershell: .bundle_build .build .acl_build ## Run user shell
 	@$(call docker_run,-it --env SHELL=/bin/bash $(RC_ENV_VARS),/bin/bash --login)

@@ -12,21 +12,37 @@
     -o PidFile=/tmp/sshd.pid
   ]
 
-  require_relative 'kitchen_docker_monkey_patches'
+  kitchen_provider = ENV['KITCHEN_PROVIDER'] || 'docker'
+  dockerized = kitchen_provider == 'docker'
+
+  if ENV['container'] == 'docker' || dockerized
+    require_relative 'spec/kitchen/docker/monkey_patches'
+  end
 %>
 driver:
-  name: docker
+  name: <%= kitchen_provider %>
   require_chef_omnibus: false
   platform: debian
   image: debian:stretch
   use_sudo: false
-  <% if ENV.key?('HTTP_PROXY') %>http_proxy: <%= ENV['HTTP_PROXY'] %><% end %>
-  <% if ENV.key?('HTTP_PROXY') %>https_proxy: <%= ENV['HTTP_PROXY'] %><% end %>
+  <% if ENV.key?('HTTP_PROXY') %>
+  http_proxy: <%= ENV['HTTP_PROXY'] %>
+  https_proxy: <%= ENV['HTTP_PROXY'] %>
+  <% end %>
+  <% if dockerized %>
   run_options:
     env: container=docker
     stop-signal: SIGRTMIN+3
   run_command: /bin/systemctl start ssh
   provision_command:
+    - if [ -n "${HTTP_PROXY}" ]; then
+        echo "Acquire::http::Proxy \"${http_proxy}\";"
+          > /etc/apt/apt.conf.d/11http-proxy
+        && export http_proxy="${HTTP_PROXY}"
+        && export https_proxy="${HTTP_PROXY}"
+        && export HTTP_PROXY="${HTTP_PROXY}"
+        && export HTTPS_PROXY="${HTTP_PROXY}" ;
+      fi
     - DEBIAN_FRONTEND=noninteractive apt-get update
       && dpkg-divert --local /bin/systemctl
       && apt-get -y install ca-certificates
@@ -57,6 +73,10 @@ driver:
   build_tempdir: .kitchen
   # https://github.com/test-kitchen/kitchen-docker/pull/283
   use_internal_docker_network: true
+  <% else %>
+  provision_command:
+    - DEBIAN_FRONTEND=noninteractive apt-get install -y python python-apt
+  <% end %>
 
 provisioner:
   name: ansible_push
@@ -70,6 +90,17 @@ provisioner:
 
 platforms:
   - name: debian-stretch
+    driver:
+      box: debian/stretch64
+      box_url: https://vagrantcloud.com/debian/stretch64
+      box_check_update: true
+      linked_clone: true
+      kitchen_cache_directory: .kitchen_cache_directory
+      provision: true
+      vagrantfiles:
+        - spec/kitchen/vagrant/vagrantfile_provision_add.rb
+      synced_folders:
+        - ['.', '/vagrant', 'disabled: true']
 
 suites:
   - name: default

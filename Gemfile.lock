@@ -99,6 +99,8 @@ GEM
       hashie (~> 3.4)
       inspec (>= 1.47.0, < 4.0.0)
       test-kitchen (~> 1.6)
+    kitchen-vagrant (1.4.0)
+      test-kitchen (~> 1.4)
     little-plugger (1.1.4)
     logging (2.2.2)
       little-plugger (~> 1.1)
@@ -261,6 +263,7 @@ DEPENDENCIES
   kitchen-ansiblepush
   kitchen-docker
   kitchen-inspec
+  kitchen-vagrant
   test-kitchen
 
 RUBY VERSION
