@@ -3,9 +3,12 @@
 # Default task show help
 default: help
 
-.PHONY : clean clear-flags clobber idempotency info login logout pull \
-	pull_or_build_if_changed push push_if_changed rebuild-all rmi run test \
-	test-dind usershell
+.PHONY : auto clean clear-flags clobber idempotency info kitchen login logout \
+	lxctest pull pull_or_build_if_changed push push_if_changed rebuild-all rmi \
+	test test-dind usershell
+
+# Inotify wait time in second for auto tests
+AUTO_SLEEP ?= 2
 
 # Test-Kitchen provider
 KITCHEN_PROVIDER ?= docker
@@ -298,6 +301,65 @@ endif
 $(foreach v,$(CHRUBY_BUILD_ARGS),$(eval $(call add_to_build_args,$v)))
 $(foreach v,$(CHRUBY_ENV_VARS),$(eval $(call add_to_env_vars,$v)))
 
+WATCH := $(shell git ls-files -z | tr "\0" ' ')
+
+ifeq (${UNAME},Darwin)
+	inotify_program = fswatch
+	make_inotifywait = $(inotify_program) -1 -r $(WATCH)
+	notify_ok = terminal-notifier -appIcon file://${PWD}/.complete.png \
+		-title "$(PROJECT_NAME) $(1)" -message passed
+	notify_fail = terminal-notifier -appIcon file://${PWD}/.reject.png \
+		-title "$(PROJECT_NAME) $(1)" -message failed
+else
+	inotify_program = inotifywait
+	make_inotifywait = $(inotify_program) -qq -e close_write -r $(WATCH)
+	notify_ok = notify-send -i ${PWD}/.complete.svg "$(PROJECT_NAME) $(1)" passed
+	notify_fail = notify-send -i ${PWD}/.reject.svg "$(PROJECT_NAME) $(2)" failed
+endif
+
+has_inotify = $(shell [ -n "$$(which $(inotify_program))" ] && echo Ok)
+
+tty_notify_ok = printf "\033[1;49;92m$(PROJECT_NAME) $(1) passed\033[0m\n"
+tty_notify_fail = printf "\033[1;49;91m$(PROJECT_NAME) $(1) failed\033[0m\n"
+
+ifeq ($(has_inotify),Ok)
+	exec_notify = \
+		( $(1) \
+			&& $(call tty_notify_ok,$(2)) && $(call notify_ok,$(2)) \
+			|| ( $(call tty_notify_fail,$(2)) && $(call notify_fail,$(2)); false ) )
+else
+	exec_notify = \
+		( $(1) \
+			&& $(call tty_notify_ok,$(2)) || ( $(call tty_notify_fail,$(2)); false ) )
+endif
+
+define make_notify
+	$(call exec_notify,$(MAKE) --no-print-directory $(1),$(2))
+endef
+
+.%.png: .%.svg
+	convert -background none -resize 256x256 $< $@
+
+auto: ## Run tests suite continuously on writes
+	@+while true; do \
+		make --no-print-directory test && \
+			echo "⇒ \033[1;49;92mauto test done\033[0m, sleeping $(AUTO_SLEEP)s…"; \
+		sleep $(AUTO_SLEEP); \
+		$(call make_inotifywait); \
+	done
+
+autolxc: ## Run LXC test suite continuously on writes
+	@+while true; do \
+		GEM_HOME=$(OLD_GEM_HOME) \
+		GEM_ROOT=$(OLD_GEM_ROOT) \
+		GEM_PATH=$(OLD_GEM_PATH) \
+		PATH=$(OLD_PATH) \
+		make --no-print-directory lxctest && \
+		echo "⇒ \033[1;49;92mauto LXC test done\033[0m, sleeping $(AUTO_SLEEP)s…"; \
+		sleep $(AUTO_SLEEP); \
+		$(call make_inotifywait); \
+	done
+
 acl: .acl_build ## Add nested ACLs rights (need sudo)
 .acl_build: ${WRITABLE_DIRECTORIES} ${WRITABLE_FILES}
 	@if [ "$(USERNS)" = 'yes' ]; then \
@@ -348,7 +410,7 @@ clean: clear-flags ## Remove writable directories
 	find ${PROJECT_ROOT}/. -type f -name \*~ -delete
 	for directory in ${WRITABLE_DIRECTORIES}; do \
 		path=${PROJECT_ROOT}/$${directory}; \
-		if [ -f $${path} ]; then \
+		if [ -d $${path} ]; then \
 			rm -rf $${path} 2> /dev/null || ( \
 				printf "\033[31;1msudo rm -rf $${directory}\033[0m\n" ; \
 				sudo rm -rf $${path} \
@@ -371,6 +433,10 @@ clear-flags:
 clobber: FLAG = build
 clobber: clean rmi clear-flags ## Do clean, rmi, remove backup (*~) files
 	find . -type f -name \*~ -delete
+
+dev4osx: ## Prepare for dev. on Osx
+	brew tap veelenga/tap
+	brew install ameba crystal fswatch imagemagick terminal-notifier
 
 help: ## Show this help
 	@printf '\033[32mtargets:\033[0m\n'
@@ -450,18 +516,18 @@ test-dind: .build .acl_build ## Run 'docker run hello-world' within image
 
 test: MAKEFLAGS =
 test: .build .acl_build ## Test (CI)
-	@make --no-print-directory info
-	@make --no-print-directory test-dind
-	@make --no-print-directory kitchen
+	@+$(call make_notify,info,info) && \
+	$(call make_notify,test-dind,test-dind) && \
+	$(call make_notify,kitchen,kitchen)
 
 lxctest: ## Test (CI) with LXC (without Docker-in-Docker)
-	@GEM_HOME=$(OLD_GEM_HOME) \
+	@$(call exec_notify,GEM_HOME=$(OLD_GEM_HOME) \
 		GEM_ROOT=$(OLD_GEM_ROOT) \
 		GEM_PATH=$(OLD_GEM_PATH) \
 		PATH=$(OLD_PATH) \
 		VAGRANT_DEFAULT_PROVIDER=lxc \
 		KITCHEN_PROVIDER=vagrant \
-		bundle exec kitchen test
+		bundle exec kitchen test,lxctest)
 
 usershell: .bundle_build .build .acl_build ## Run user shell
 	@$(call docker_run,-it --env SHELL=/bin/bash $(RC_ENV_VARS),/bin/bash --login)

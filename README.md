@@ -137,3 +137,22 @@ Example of working configuration for a `foo` account:
     ```
 
 Then run **dockerd** with valid user namespace parameter: `--userns-remap=foo`.
+
+## Development
+
+### OsX (for fancy autotests / continuous testing)
+
+```Shell
+brew tap veelenga/tap
+brew install ameba crystal fswatch imagemagick terminal-notifier
+```
+or
+```Shell
+make dev4osx
+```
+
+### Debian/Ubuntu (for fancy autotests / continuous testing)
+
+```Shell
+apt install -y -q inotify-tools libnotify-bin
+```
