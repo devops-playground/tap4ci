@@ -110,7 +110,7 @@ suites:
         ansible_fqdn: default-sandbox.local
     verifier:
       inspec_tests:
-        - sshd_spec.rb
+        - spec/roles/common/sshd_spec.rb
 
 transport:
   username: <%= ENV['KITCHEN_USERNAME'] %>
