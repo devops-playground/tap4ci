@@ -438,6 +438,10 @@ dev4osx: ## Prepare for dev. on Osx
 	brew tap veelenga/tap
 	brew install ameba crystal fswatch imagemagick terminal-notifier
 
+githook: ## Install Git pre-commit hook
+	@printf "#!/bin/sh\nset -e\nmake lxctest\nmake test\n" > .git/hooks/pre-commit
+	@chmod a+rx .git/hooks/pre-commit
+
 help: ## Show this help
 	@printf '\033[32mtargets:\033[0m\n'
 	@grep -E '^[a-zA-Z _-]+:.*?## .*$$' $(MAKEFILE_LIST) \
