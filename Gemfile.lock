@@ -17,6 +17,7 @@ GEM
       ms_rest_azure (~> 0.11.0)
     azure_mgmt_resources (0.17.2)
       ms_rest_azure (~> 0.11.0)
+    bcrypt_pbkdf (1.0.0)
     builder (3.2.3)
     coderay (1.1.2)
     concurrent-ruby (1.1.4)
@@ -145,6 +146,10 @@ GEM
       coderay (~> 1.1.0)
       method_source (~> 0.9.0)
     public_suffix (3.0.3)
+    rbnacl (4.0.2)
+      ffi
+    rbnacl-libsodium (1.0.16)
+      rbnacl (>= 3.0.1)
     representable (3.0.4)
       declarative (< 0.1.0)
       declarative-option (< 0.2.0)
@@ -260,10 +265,13 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  bcrypt_pbkdf (< 2.0)
   kitchen-ansiblepush
   kitchen-docker
   kitchen-inspec
   kitchen-vagrant
+  rbnacl (>= 3.2, < 5.0)
+  rbnacl-libsodium
   test-kitchen
 
 RUBY VERSION

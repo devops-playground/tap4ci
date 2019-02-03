@@ -35,6 +35,7 @@ libgdbm-dev \
 libncurses5-dev \
 libreadline-dev \
 libsigsegv2 \
+libsodium18 \
 libssl-dev \
 libtinfo-dev \
 libyaml-dev \
