@@ -1,5 +1,8 @@
 ---
 <%
+  ANSIBLE_CHECK_MODE = \
+    ENV['ANSIBLE_CHECK_MODE']&.match? /^(1|[Yy](es)?|[Tt](rue)?)$/
+
   SYSTEMCTL_REPLACEMENT_URL = \
    "https://raw.githubusercontent.com/gdraheim/docker-systemctl-replacement\
 /master/files/docker/systemctl.py"
@@ -78,13 +81,15 @@ driver:
     - DEBIAN_FRONTEND=noninteractive apt-get install -y python python-apt
   <% end %>
 
+
+
 provisioner:
   name: ansible_push
   playbook: site.yml
   sudo: true
   sudo_user: root
   ask_vault_pass: false
-  idempotency_test: true
+  idempotency_test: <%= ! ANSIBLE_CHECK_MODE %>
   fail_non_idempotent: true
   chef_bootstrap_url: nil
 
@@ -108,6 +113,7 @@ suites:
       custom_instance_name: default-sandbox.local
       extra_vars:
         ansible_fqdn: default-sandbox.local
+        ansible_check_mode: <%= ANSIBLE_CHECK_MODE %>
     verifier:
       inspec_tests:
         - spec/roles/common/sshd_spec.rb
@@ -124,6 +130,8 @@ transport:
   request_pty: false
   timeout: 3
   non_interactive: true
+<% unless ANSIBLE_CHECK_MODE %>
 
 verifier:
   name: inspec
+<% end %>

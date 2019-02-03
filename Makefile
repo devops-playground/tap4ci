@@ -325,16 +325,19 @@ tty_notify_fail = printf "\033[1;49;91m$(PROJECT_NAME) $(1) failed\033[0m\n"
 ifeq ($(has_inotify),Ok)
 	exec_notify = \
 		( $(1) \
-			&& $(call tty_notify_ok,$(2)) && $(call notify_ok,$(2)) \
-			|| ( $(call tty_notify_fail,$(2)) && $(call notify_fail,$(2)); false ) )
+			&& $(call tty_notify_ok,"$(2)") && $(call notify_ok,"$(2)") \
+			|| ( \
+				$(call tty_notify_fail,"$(2)") && $(call notify_fail,"$(2)"); \
+				false ) )
 else
 	exec_notify = \
 		( $(1) \
-			&& $(call tty_notify_ok,$(2)) || ( $(call tty_notify_fail,$(2)); false ) )
+			&& $(call tty_notify_ok,"$(2)") \
+			|| ( $(call tty_notify_fail,"$(2)"); false ) )
 endif
 
 define make_notify
-	$(call exec_notify,$(MAKE) --no-print-directory $(1),$(2))
+	$(call exec_notify,$(MAKE) --no-print-directory $(1),"$(2)")
 endef
 
 .%.png: .%.svg
@@ -392,6 +395,9 @@ else
 	done
 endif
 	touch .acl_build
+
+ansible_check: bundle ## Run kitchen converge with Ansible in check mode
+	@$(call docker_run,${WRITABLE_VOLUMES_ARGS} --env=ANSIBLE_CHECK_MODE=1,bundle exec kitchen converge)
 
 build: .build ## Build project container
 .build: Dockerfile .bash_profile
@@ -520,18 +526,33 @@ test-dind: .build .acl_build ## Run 'docker run hello-world' within image
 
 test: MAKEFLAGS =
 test: .build .acl_build ## Test (CI)
-	@+$(call make_notify,info,info) && \
-	$(call make_notify,test-dind,test-dind) && \
-	$(call make_notify,kitchen,kitchen)
+	@+$(call make_notify,info,'Docker info') && \
+	$(call make_notify,test-dind,'Docker-in-Docker') && \
+	$(call make_notify,bundle,'Bundle') && \
+	$(call make_notify,ansible_check,'Ansible check') && \
+	$(call make_notify,kitchen,'Kitchen test')
 
 lxctest: ## Test (CI) with LXC (without Docker-in-Docker)
 	@$(call exec_notify,GEM_HOME=$(OLD_GEM_HOME) \
-		GEM_ROOT=$(OLD_GEM_ROOT) \
 		GEM_PATH=$(OLD_GEM_PATH) \
+		GEM_ROOT=$(OLD_GEM_ROOT) \
+		PATH=$(OLD_PATH) \
+		bundle install,'Bundle') && \
+	$(call exec_notify,GEM_HOME=$(OLD_GEM_HOME) \
+		ANSIBLE_CHECK_MODE=1 \
+		GEM_PATH=$(OLD_GEM_PATH) \
+		GEM_ROOT=$(OLD_GEM_ROOT) \
+		KITCHEN_PROVIDER=vagrant \
 		PATH=$(OLD_PATH) \
 		VAGRANT_DEFAULT_PROVIDER=lxc \
+		bundle exec kitchen converge,'LXC Ansible check') && \
+	$(call exec_notify,GEM_HOME=$(OLD_GEM_HOME) \
+		GEM_PATH=$(OLD_GEM_PATH) \
+		GEM_ROOT=$(OLD_GEM_ROOT) \
 		KITCHEN_PROVIDER=vagrant \
-		bundle exec kitchen test,lxctest)
+		PATH=$(OLD_PATH) \
+		VAGRANT_DEFAULT_PROVIDER=lxc \
+		bundle exec kitchen test,'LXC Kitchen test')
 
 usershell: .bundle_build .build .acl_build ## Run user shell
 	@$(call docker_run,-it --env SHELL=/bin/bash $(RC_ENV_VARS),/bin/bash --login)

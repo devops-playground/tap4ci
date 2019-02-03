@@ -6,7 +6,7 @@
 
   tasks:
     - debug:
-        var: ansible_ssh_user
-    - debug:
-        var: ansible_fqdn
+        msg:
+          ansible_ssh_user: "{{ ansible_ssh_user }}"
+          hostvars__inventory_hostname: "{{ hostvars[inventory_hostname] }}"
 ...
