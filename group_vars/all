@@ -1,0 +1,6 @@
+--- 
+# file: all, group variables
+
+ansible_managed: >-
+  ***** /!\ Ansible managed file, do not edit: all changes will be lost *****
+... 

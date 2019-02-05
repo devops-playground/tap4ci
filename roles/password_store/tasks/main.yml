@@ -1,0 +1,15 @@
+---
+- name: Password store configured fact set
+  set_fact:
+    password_store_configured: "{{ password_store_dir is defined }}"
+
+- debug:
+    var: password_store_configured
+  when: password_store_configured
+
+- include_tasks: decrypt.yml
+  when: password_store_configured and password_store.decrypt is defined
+
+- include_tasks: push.yml
+  when: password_store_configured and password_store.push is defined
+...

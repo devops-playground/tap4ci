@@ -1,0 +1,54 @@
+---
+- name: Stat remote password store files
+  stat:
+    path: "{{ item.path }}"
+  with_items: "{{ password_store.pull }}"
+  register: password_store_pulled_stat_raw
+
+- name: Set remote password store files to be pulled fact
+  set_fact:
+    password_store_pulled_stat_dict: "{{ ( password_store_pulled_stat_dict | default({}) | combine({ item.item.dest: ( item.stat | combine({ 'dest': item.item.dest, 'force': (item.item.force | default(false)) }) ) }) ) }}"
+  with_items: "{{ password_store_pulled_stat_raw.results }}"
+
+- name: Set password store file to be pulled stat list fact
+  set_fact:
+    password_store_pulled_stat: "{{ password_store_pulled_stat_dict.values() | selectattr('exists', 'equalto', true) | list }}"
+
+- name: Retrieve remote password store files content to be pulled
+  command: "cat {{ item.path }}"
+  register: password_store_pulled_content
+  with_items: "{{ password_store_pulled_stat }}"
+  changed_when: false
+
+- name: Set remote password store files content to be pulled fact
+  set_fact:
+    password_store_pulled_content_dict: "{{ ( password_store_pulled_content_dict | default({}) | combine({ item.item.dest: { 'content': item.stdout, 'dest': item.item.dest, 'force': item.item.force } }) ) }}"
+  with_items: "{{ password_store_pulled_content.results }}"
+
+- name: Set remote password store files to be pulled fact as list
+  set_fact:
+    password_store_pulled: "{{ password_store_pulled_content_dict.values() }}"
+
+- name: Decrypt password store files to be pulled
+  set_fact:
+    password_store_pulled_with_original_content: "{{ ( password_store_pulled_with_original_content | default([]) ) + [ ( item | combine( { 'original_content': ( lookup('passwordstore', item.dest + ' returnall=true create=true') | string ) } ) ) ] }}"
+  with_items: "{{ password_store_pulled }}"
+  register: password_store_pulled_with_original_content
+  ignore_errors: Yes
+
+- debug:
+    var: password_store_pulled_with_original_content
+
+- name: Store remote password store files to be pull in password-store
+  local_action:
+    module: command
+    # module: shell
+    # stdin: "{{ item.content | string }}"
+    _raw_params: >-
+      sh -c '/bin/echo -en "{{ item.content }}" | pass insert {% if item.force %} -f{% endif %} -m {{ item.dest }}'
+  with_items: "{{ password_store_pulled_with_original_content }}"
+  when: item.original_content is not defined or item.content != item.original_content
+  vars:
+    display_args_to_stdout: true
+  become: false
+...

@@ -1,5 +1,7 @@
 ---
 <%
+  require_relative 'spec/spec_helper'
+
   ANSIBLE_CHECK_MODE = \
     ENV['ANSIBLE_CHECK_MODE']&.match? /^(1|[Yy](es)?|[Tt](rue)?)$/
 
@@ -15,15 +17,17 @@
     -o PidFile=/tmp/sshd.pid
   ]
 
-  kitchen_provider = ENV['KITCHEN_PROVIDER'] || 'docker'
-  dockerized = kitchen_provider == 'docker'
-
-  if ENV['container'] == 'docker' || dockerized
+  if ENV['container'] == 'docker' || DOCKERIZED
     require_relative 'spec/kitchen/docker/monkey_patches'
+
+    kitchen_docker_id_rsa = ROOT / '.kitchen/docker_id_rsa'
+    if File.exists?(kitchen_docker_id_rsa)
+      FileUtils.chmod(0o600, kitchen_docker_id_rsa)
+    end
   end
 %>
 driver:
-  name: <%= kitchen_provider %>
+  name: <%= KITCHEN_PROVIDER %>
   require_chef_omnibus: false
   platform: debian
   image: debian:stretch
@@ -32,7 +36,7 @@ driver:
   http_proxy: <%= ENV['HTTP_PROXY'] %>
   https_proxy: <%= ENV['HTTP_PROXY'] %>
   <% end %>
-  <% if dockerized %>
+  <% if DOCKERIZED %>
   run_options:
     env: container=docker
     stop-signal: SIGRTMIN+3
@@ -56,7 +60,7 @@ driver:
                             systemd
       && apt-get clean
       && apt-get -y autoremove
-      && curl -q -o /tmp/systemctl <%= SYSTEMCTL_REPLACEMENT_URL %>
+      && curl -q -o /tmp/systemctl https://raw.githubusercontent.com/gdraheim/docker-systemctl-replacement/master/files/docker/systemctl.py
       && install -o root -g root -m 0755 /tmp/systemctl /bin/systemctl
       && rm -rf /tmp/* /var/tmp/*
       && find /etc/systemd/system /lib/systemd/system
@@ -92,9 +96,23 @@ provisioner:
   idempotency_test: <%= ! ANSIBLE_CHECK_MODE %>
   fail_non_idempotent: true
   chef_bootstrap_url: nil
+  # verbose level v, vv, vvv, vvvv
+  verbose: 
+  raw_arguments: --timeout=10 --diff
 
 platforms:
   - name: debian-stretch
+    lifecycle:
+      pre_converge: >
+        if [ -d /tmp/.<%= NAME %>_password-store ]; then
+          rm -rf /tmp/.<%= NAME %>_password-store ;
+        fi ;
+        if [ -d /tmp/.<%= NAME %>_gnupg ]; then
+          rm -rf /tmp/.<%= NAME %>_gnupg ;
+        fi ;
+        cp -a <%= PASSWORD_STORE %> /tmp/.<%= NAME %>_password-store ;
+        cp -a <%= GNUPG %> /tmp/.<%= NAME %>_gnupg ;
+        printf "\n\033[36;1m####### pre_converge_command done ########\033[0m\n\n"
     driver:
       box: debian/stretch64
       box_url: https://vagrantcloud.com/debian/stretch64
@@ -112,11 +130,24 @@ suites:
     provisioner:
       custom_instance_name: default-sandbox.local
       extra_vars:
-        ansible_fqdn: default-sandbox.local
         ansible_check_mode: <%= ANSIBLE_CHECK_MODE %>
+        ansible_fqdn: default-sandbox.local
     verifier:
       inspec_tests:
         - spec/roles/common/sshd_spec.rb
+  - name: password-store
+    provisioner:
+      playbook: spec/kitchen/playbooks/password-store.yml
+      mygroup: password_store
+      custom_instance_name: password-store-sandbox.local
+      extra_vars:
+        ansible_check_mode: <%= ANSIBLE_CHECK_MODE %>
+        ansible_fqdn: password-store-sandbox.local
+    verifier:
+      inspec_tests:
+        - spec/roles/password_store/push_spec.rb
+      attributes:
+        host_vars_path: password-store-sandbox.local
 
 transport:
   username: <%= ENV['KITCHEN_USERNAME'] %>

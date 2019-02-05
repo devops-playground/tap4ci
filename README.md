@@ -16,7 +16,7 @@ Sharing a common [Ansible](https://github.com/ansible/ansible) Provisioning with
 for a remote Linux/OsX team and keep most of test & CI code in repository:
 
 * [x] Ansible based provisioning
-* [ ] [Password-Store](https://github.com/test-kitchen/test-kitchen) for credentials management
+* [x] [Password-Store](https://github.com/test-kitchen/test-kitchen) for credentials management
 * [x] Testable provisioning with **Test-Kitchen**
 * [x] Bundler friendly (mounted `.bundle` with proper rights)
 * [x] custom Ruby version via `.ruby-version` file

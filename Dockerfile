@@ -46,6 +46,7 @@ man-db \
 ncurses-base \
 ncurses-term \
 openssh-client \
+pass \
 procps \
 rsync \
 ruby \

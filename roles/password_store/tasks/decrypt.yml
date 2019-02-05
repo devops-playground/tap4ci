@@ -1,0 +1,7 @@
+---
+- name: Decrypt password store entries
+  set_fact:
+    password_store_decrypted: "{{ ( password_store_decrypted | default([]) ) + [ { item.name: ( lookup('passwordstore', item.src + ' returnall=true') ) } ] }}"
+  with_items: "{{ password_store.decrypt }}"
+  register: password_store_decrypted
+...
