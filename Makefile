@@ -244,7 +244,11 @@ endef
 # Define function to check if Dockerfile has changed since last commit / master
 define dockerfile_changed
 	test -n "$$(git diff origin/master -- Dockerfile)" \
-		-o -n "$$(git diff HEAD~1 -- Dockerfile)"
+		-o -n "$$(git diff HEAD~1 -- Dockerfile)" \
+		-o -n "$$(git diff origin/master -- .ruby-tarball-sha256)" \
+		-o -n "$$(git diff HEAD~1 -- .ruby-tarball-sha256)" \
+		-o -n "$$(git diff origin/master -- .ruby-version)" \
+		-o -n "$$(git diff HEAD~1 -- .ruby-version)"
 endef
 
 # Check Docker daemon experimental features (for build squashing)
