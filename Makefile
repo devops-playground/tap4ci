@@ -367,41 +367,41 @@ autolxc: ## Run LXC test suite continuously on writes
 		$(call make_inotifywait); \
 	done
 
+define sudo
+	cmd="sudo ${1}" && printf "\n\033[31;1m$${cmd}\033[0m\n\n" && $${cmd}
+endef
+
+
 acl: .acl_build ## Add nested ACLs rights (need sudo)
 .acl_build: ${WRITABLE_DIRECTORIES} ${WRITABLE_FILES}
-	@if [ "$(USERNS)" = 'yes' ]; then \
-		cmd='sudo setfacl -Rm g:$(DOCKER_USERNS_GROUP):rwX /var/run/docker.sock' \
-			&& printf "\n\033[31;1m$${cmd}\033[0m\n\n" \
-			&& $${cmd} ; \
-		if [ "$(TMUX_CONF)" = 'Ok' ]; then \
-			cmd='sudo setfacl -Rm g:$(DOCKER_USERNS_GROUP):r $(HOME)/.tmux.conf' \
-			&& printf "\n\033[31;1m$${cmd}\033[0m\n\n" \
-			&& $${cmd} ; \
-		fi ; \
-	fi
 ifeq ($(USERNS),yes)
+	$(call sudo,setfacl -Rm g:$(DOCKER_USERNS_GROUP):rwX /var/run/docker.sock)
+	if [ "$(TMUX_CONF)" = 'Ok' ]; then \
+		$(call sudo,\
+			setfacl -Rm g:$(DOCKER_USERNS_GROUP):r $(HOME)/.tmux.conf) ; \
+	fi
 	for dir in ${WRITABLE_DIRECTORIES}; do \
-		args="-Rm g:${DOCKER_USERNS_GROUP}:rwX ${PROJECT_ROOT}/$${dir}" ; \
-		printf "\033[31;1msudo setfacl $${args}\033[0m\n" ; \
-		sudo setfacl $${args} ; \
+		$(call sudo,\
+			setfacl -Rm g:${DOCKER_USERNS_GROUP}:rwX ${PROJECT_ROOT}/$${dir}) ; \
 	done
 	for file in ${WRITABLE_FILES}; do \
-		args="-m g:${DOCKER_USERNS_GROUP}:rwX ${PROJECT_ROOT}/$${file}" ; \
-		printf "\033[31;1msudo setfacl $${args}\033[0m\n" ; \
-		sudo setfacl $${args} ; \
+		$(call sudo,\
+			setfacl -m g:${DOCKER_USERNS_GROUP}:rwX ${PROJECT_ROOT}/$${file}) ; \
 	done
 else
 	for dir in ${WRITABLE_DIRECTORIES}; do \
-		chmod a+rwX -R "${PROJECT_ROOT}/$${dir}" ; \
+		chmod a+rwX -R "${PROJECT_ROOT}/$${dir}" 2> /dev/null; \
 	done ; \
 	for file in ${WRITABLE_FILES}; do \
-		chmod a+rw "${PROJECT_ROOT}/$${file}" ; \
+		chmod a+rw "${PROJECT_ROOT}/$${file}" 2> /dev/null; \
 	done
 endif
 	touch .acl_build
 
 ansible_check: bundle ## Run kitchen converge with Ansible in check mode
-	@$(call docker_run,${WRITABLE_VOLUMES_ARGS} --env=ANSIBLE_CHECK_MODE=1,bundle exec kitchen converge)
+	@$(call docker_run,\
+		${WRITABLE_VOLUMES_ARGS} --env=ANSIBLE_CHECK_MODE=1,\
+		bundle exec kitchen converge)
 
 build: .build ## Build project container
 .build: Dockerfile .bash_profile
@@ -491,10 +491,11 @@ pull: ## Run 'docker pull' with image
 	touch .build
 
 pull_or_build_if_changed:
-	+if $(call dockerfile_changed); then \
+	+@if $(call dockerfile_changed); then \
 		make build; \
 	else \
-		( make login && make pull ) || make build ; \
+		( make --no-print-directory login && make --no-print-directory pull ) \
+			|| make build ; \
 	fi
 
 push: login .build ## Run 'docker push' with image
