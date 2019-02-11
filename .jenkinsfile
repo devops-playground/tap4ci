@@ -1,0 +1,50 @@
+pipeline {
+  agent {
+    label 'lvr-dind'
+  }
+
+  environment {
+    CI = '1'
+    DOCKER_PASSWORD = credentials('p1lvr_docker_password')
+    DOCKER_REGISTRY = 'https://index.docker.io/v1/'
+    DOCKER_USERNAME = 'p1lvr'
+    PROJECT_NAME = 'tap4ci'
+  }
+
+  stages {
+    stage('Build') {
+      steps {
+        sh 'make pull_or_build_if_changed'
+        sh 'make push'
+      }
+    }
+
+    stage('Test') {
+      steps {
+        sh 'make pull'
+        sh 'make clean'
+        sh 'docker info'
+        sh 'id'
+        sh 'make bundle'
+        sh 'make test'
+      }
+    }
+
+    stage('Push') {
+      when {
+        expression {
+          return (env.BRANCH_NAME == 'bootstrap' || env.BRANCH_NAME == 'master');
+        }
+      }
+      steps {
+        sh 'make pull_then_push_to_latest'
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'make clobber'
+    }
+  }
+}
