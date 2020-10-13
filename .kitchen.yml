@@ -3,7 +3,7 @@
   require_relative 'spec/spec_helper'
 
   ANSIBLE_CHECK_MODE = \
-    ENV['ANSIBLE_CHECK_MODE']&.match? /^(1|[Yy](es)?|[Tt](rue)?)$/
+    ENV['ANSIBLE_CHECK_MODE']&.match?(/^(1|[Yy](es)?|[Tt](rue)?)$/)
 
   SYSTEMCTL_REPLACEMENT_URL = \
    "https://raw.githubusercontent.com/gdraheim/docker-systemctl-replacement\
@@ -13,9 +13,8 @@
     -o UseDNS=no
     -o UsePAM=no
     -o PasswordAuthentication=yes
-    -o UsePrivilegeSeparation=no
     -o PidFile=/tmp/sshd.pid
-  ]
+  ].join(' ')
 
   if ENV['container'] == 'docker' || DOCKERIZED
     require_relative 'spec/kitchen/docker/monkey_patches'
@@ -25,12 +24,86 @@
       FileUtils.chmod(0o600, kitchen_docker_id_rsa)
     end
   end
+
+  ANSIBLE_CONFIG = (Pathname.new(__dir__) / 'ansible.cfg').to_s
+
+  require 'kitchen/docker/container'
+  require 'kitchen/docker/container/linux'
+  require 'kitchen/docker/helpers/image_helper'
+  require 'kitchen/driver/docker'
+
+  module Kitchen
+    module Docker
+      class Container
+        class Linux < ::Kitchen::Docker::Container
+          # https://github.com/test-kitchen/kitchen-docker/commit/a2b0511c64b19fe26c6c3a7720602bc7b28195bd
+          unless self.class.methods.include?(:hostname)
+            def hostname(state)
+              hostname = 'localhost'
+
+              if remote_socket?
+                hostname = socket_uri.host
+              elsif @config[:use_internal_docker_network]
+                hostname = container_ip_address(state)
+              end
+
+              hostname
+            end
+          end
+
+          def create(state)
+            debug('Creating Linux container')
+            generate_keys
+
+            state[:ssh_key] = @config[:private_key]
+            state[:image_id] = build_image(state, dockerfile) unless state[:image_id]
+            state[:container_id] = run_container(state, 22) unless state[:container_id]
+            state[:hostname] = hostname(state)
+            state[:port] = container_ssh_port(state)
+
+            super
+          end
+        end
+      end
+
+      module Helpers
+        module ImageHelper
+          def build_image(state, dockerfile)
+            cmd = 'build'
+            cmd << ' --no-cache' unless config[:use_cache]
+            extra_build_options = config_to_options(config[:build_options])
+            cmd << " #{extra_build_options}" unless extra_build_options.empty?
+            dockerfile_contents = dockerfile
+            build_context = config[:build_context] ? '.' : '-'
+            file = Tempfile.new('Dockerfile-kitchen', Pathname.pwd + config[:build_tempdir])
+            output = begin
+                       file.write(dockerfile)
+                       file.close
+                       docker_command("#{cmd} -f #{Shellwords.escape(dockerfile_path(file))} #{build_context}",
+                                      input: dockerfile_contents)
+                     ensure
+                       file.close unless file.closed?
+                       file.unlink
+                     end
+
+            parse_image_id(output)
+          end
+        end
+      end
+    end
+
+    module Driver
+      class Docker < ::Kitchen::Driver::Base
+        default_config :build_tempdir, Dir.pwd
+      end
+    end
+  end
 %>
+
 driver:
   name: <%= KITCHEN_PROVIDER %>
   require_chef_omnibus: false
   platform: debian
-  image: debian:stretch
   use_sudo: false
   <% if ENV.key?('HTTP_PROXY') %>
   http_proxy: <%= ENV['HTTP_PROXY'] %>
@@ -50,17 +123,20 @@ driver:
         && export HTTP_PROXY="${HTTP_PROXY}"
         && export HTTPS_PROXY="${HTTP_PROXY}" ;
       fi
-    - DEBIAN_FRONTEND=noninteractive apt-get update
+    - export DEBIAN_FRONTEND=noninteractive
+      && apt -q -y -o Acquire::AllowReleaseInfoChange=yes update
       && dpkg-divert --local /bin/systemctl
-      && apt-get -y install ca-certificates
-                            curl
-                            openssh-server
-                            python
-                            python-apt
-                            systemd
-      && apt-get clean
-      && apt-get -y autoremove
-      && curl -q -o /tmp/systemctl https://raw.githubusercontent.com/gdraheim/docker-systemctl-replacement/master/files/docker/systemctl.py
+      && apt -q -y install ca-certificates
+                           curl
+                           debconf-utils
+                           openssh-server
+                           python3
+                           python3-apt
+                           systemd
+      && apt clean
+      && apt -y autoremove
+      && curl https://raw.githubusercontent.com/gdraheim/docker-systemctl-replacement/master/files/docker/systemctl3.py
+              -o /tmp/systemctl
       && install -o root -g root -m 0755 /tmp/systemctl /bin/systemctl
       && rm -rf /tmp/* /var/tmp/*
       && find /etc/systemd/system /lib/systemd/system
@@ -72,20 +148,36 @@ driver:
               -not -name '*systemd-tmpfiles*'
               -not -name '*systemd-user-sessions*'
               -exec rm \{} \;
-      && sed -e 's|^\(SSHD_OPTS=\).*$|\1"<%= SSHD_OPTS.join(' ') %>"|'
+      && sed -e 's|^\(SSHD_OPTS=\).*$|\1"<%= SSHD_OPTS %>"|'
              -ri /etc/default/ssh
-      && systemctl enable ssh
-      && systemctl start ssh
+      && ( /bin/systemctl enable ssh ; /bin/systemctl start ssh ; true )
+    - dpkg-divert --local /sbin/hwclock
+      && mv /sbin/hwclock /sbin/hwclock.distrib
+      && ln -s /bin/true /sbin/hwclock
+    - for file in iptables ip6tables; do
+        dpkg-divert --local /sbin/$file ;
+        if [ -f /sbin/$file ]; then
+          mv /sbin/$file /sbin/$file.distrib ;
+        fi ;
+        /bin/echo -e "#!/bin/bash\necho \"\${0##*/} v1.6.0\""
+          > /sbin/$file && chmod a+rx /sbin/$file ;
+      done
+    - touch /etc/.kitchenized
   # https://github.com/test-kitchen/kitchen-docker/pull/294
   build_tempdir: .kitchen
   # https://github.com/test-kitchen/kitchen-docker/pull/283
   use_internal_docker_network: true
   <% else %>
   provision_command:
-    - DEBIAN_FRONTEND=noninteractive apt-get install -y python python-apt
+    - DEBIAN_FRONTEND=noninteractive apt install -q -y debcont-utils python3 python3-apt
   <% end %>
-
-
+  linked_clone: true
+  kitchen_cache_directory: .kitchen_cache_directory
+  provision: true
+  vagrantfiles:
+    - spec/kitchen/vagrant/vagrantfile_provision_add.rb
+  synced_folders:
+    - ['.', '/vagrant', 'disabled: true']
 
 provisioner:
   name: ansible_push
@@ -98,32 +190,28 @@ provisioner:
   chef_bootstrap_url: nil
   # verbose level v, vv, vvv, vvvv
   verbose: 
-  raw_arguments: --timeout=10 --diff
+  raw_arguments: >-
+    <% if ANSIBLE_CHECK_MODE %>--check <% end %>--timeout=10 --diff
+  environment_vars:
+    ANSIBLE_CONFIG: <%= ANSIBLE_CONFIG %>
 
 platforms:
-  - name: debian-stretch
+  - name: debian-buster
     lifecycle:
-      pre_converge: >
-        if [ -d /tmp/.<%= NAME %>_password-store ]; then
-          rm -rf /tmp/.<%= NAME %>_password-store ;
-        fi ;
-        if [ -d /tmp/.<%= NAME %>_gnupg ]; then
-          rm -rf /tmp/.<%= NAME %>_gnupg ;
-        fi ;
-        cp -a <%= PASSWORD_STORE %> /tmp/.<%= NAME %>_password-store ;
-        cp -a <%= GNUPG %> /tmp/.<%= NAME %>_gnupg ;
-        printf "\n\033[36;1m####### pre_converge_command done ########\033[0m\n\n"
+      pre_converge: <%= PRE_CONVERGE_SCRIPT %>
     driver:
-      box: debian/stretch64
-      box_url: https://vagrantcloud.com/debian/stretch64
+      image: debian:buster
+      box: debian/buster64
+      box_url: https://vagrantcloud.com/debian/buster64
       box_check_update: true
-      linked_clone: true
-      kitchen_cache_directory: .kitchen_cache_directory
-      provision: true
-      vagrantfiles:
-        - spec/kitchen/vagrant/vagrantfile_provision_add.rb
-      synced_folders:
-        - ['.', '/vagrant', 'disabled: true']
+  - name: ubuntu-focal
+    lifecycle:
+      pre_converge: <%= PRE_CONVERGE_SCRIPT %>
+    driver:
+      image: ubuntu:focal
+      box: ubuntu/focal64
+      box_url: https://vagrantcloud.com/ubuntu/focal64
+      box_check_update: <%= ENV['VAGRANT_DEFAULT_PROVIDER'] != 'lxc' %>
 
 suites:
   - name: default
@@ -137,8 +225,9 @@ suites:
         - spec/roles/common/sshd_spec.rb
   - name: password-store
     provisioner:
-      playbook: spec/kitchen/playbooks/password-store.yml
-      mygroup: password_store
+      playbook: spec/kitchen/playbooks/site.yml
+      mygroup:
+        - password-store
       custom_instance_name: password-store-sandbox.local
       extra_vars:
         ansible_check_mode: <%= ANSIBLE_CHECK_MODE %>

@@ -1,5 +1,5 @@
 ---
-version: 2
+version: 2.1
 
 common_environment: &common_environment
   environment:
@@ -9,8 +9,8 @@ common_environment: &common_environment
 
 docker_environment: &docker_environment
   machine:
-    image: circleci/classic:201708-01
-    docker_layer_caching: true
+    image: ubuntu-2004:202008-01
+    # <not available on free plan> docker_layer_caching: true
 
 login_to_docker_registry: &login_to_docker_registry
   run:
@@ -40,6 +40,7 @@ jobs:
       - run:
           name: Pull or build container if changed
           command: make pull_or_build_if_changed
+          no_output_timeout: 30m
       - run:
           name: Push container
           command: make push

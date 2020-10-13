@@ -7,7 +7,7 @@ env:
 
 sudo: required
 
-dist: xenial
+dist: buster
 
 language: ruby
 
@@ -15,10 +15,6 @@ services:
   - docker
 
 before_install:
-  - sudo apt-add-repository
-    "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-  - sudo apt-get update -q
-  - sudo apt-get install -o Dpkg::Options::="--force-confold" -y -q docker-ce
   - git checkout ${TRAVIS_BRANCH}
   - git branch -u origin/${TRAVIS_BRANCH}
   - git config branch.${TRAVIS_BRANCH}.remote origin
@@ -26,7 +22,7 @@ before_install:
   - git config --unset remote.origin.fetch
   - git config --add remote.origin.fetch +refs/heads/*:refs/remotes/origin/*
   - git fetch origin master
-  - make pull_or_build_if_changed
+  - travis_wait 30 make pull_or_build_if_changed
   - make push
 
 script:

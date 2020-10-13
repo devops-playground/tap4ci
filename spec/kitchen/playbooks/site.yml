@@ -1,0 +1,59 @@
+---
+- name: Set Kitchen vars and start_time playbook
+  hosts: all,localhost
+
+  gather_facts: No
+  run_once: True
+
+  vars:
+    kitchen_provider: "{{ lookup('env', 'KITCHEN_PROVIDER') }}"
+
+  tasks:
+
+    - set_fact:
+        start_time: "{{ lookup('pipe','date \"+%Y-%m-%d %H:%M:%S\"') }}"
+      delegate_to: localhost
+      delegate_facts: yes
+
+    - set_fact:
+        kitchen_provider: "{{ kitchen_provider }}"
+      delegate_to: localhost
+      delegate_facts: yes
+
+    - set_fact:
+        kitchenized: "{{ kitchen_provider in ['docker', 'vagrant'] }}"
+      delegate_to: localhost
+      delegate_facts: yes
+
+- name: Main site playbook (with roles)
+  hosts: all
+
+  gather_facts: No
+
+  vars:
+    ansible_fqdn: "{{ inventory_hostname_short }}.{{ ansible_domain }}"
+    dockerized: "{{ kitchen_provider == 'docker' }}"
+    hostvars__inventory_hostname: "{{ hostvars[inventory_hostname] }}"
+    kitchen_provider: "{{ hostvars.localhost.kitchen_provider }}"
+    kitchenized: "{{ hostvars.localhost.kitchenized }}"
+    password_store_dir: "{{ lookup('env', 'PASSWORD_STORE_DIR') }}"
+
+  pre_tasks:
+
+    - debug:
+        msg:
+          ANSIBLE_CHECK_MODE: "{{ lookup('env', 'ANSIBLE_CHECK_MODE') }}"
+          ansible_check_mode: "{{ ansible_check_mode }}"
+          ansible_fqdn: "{{ ansible_fqdn }}"
+          dockerized: "{{ dockerized }}"
+          hostvars__inventory_hostname: "{{ hostvars__inventory_hostname }}"
+          kitchen_provider: "{{ kitchen_provider }}"
+          kitchenized: "{{ kitchenized }}"
+          password_store_dir: "{{ password_store_dir }}"
+        verbosity: 1
+
+  roles:
+
+    - name: password_store
+      when: ( 'password-store' in hostvars__inventory_hostname.group_names )
+...
