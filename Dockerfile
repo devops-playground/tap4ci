@@ -1,8 +1,8 @@
 # Dockerfile: docker(1) container build file.
 
-ARG DEB_DIST=stretch
-FROM debian:${DEB_DIST}
-ARG DEB_DIST=stretch
+ARG DEB_DIST=bullseye
+FROM debian:${DEB_DIST}-slim
+ARG DEB_DIST=bullseye
 
 LABEL maintainer="Laurent Vallar <val@zbla.net>"
 LABEL organization="DevOps Playground"
@@ -35,7 +35,6 @@ libgdbm-dev \
 libncurses5-dev \
 libreadline-dev \
 libsigsegv2 \
-libsodium18 \
 libssl-dev \
 libtinfo-dev \
 libyaml-dev \
@@ -63,10 +62,6 @@ ARG DEB_SECURITY_MIRROR_URL=http://security.debian.org
 # NB processors
 ARG NB_PROC=1
 
-# Docker env
-ARG DEB_DOCKER_GPGID=7EA0A9C3F273FCD8
-ARG DEB_DOCKER_URL=https://download.docker.com/linux/debian
-
 # If behind an HTTP proxy
 ARG HTTP_PROXY=
 ENV http_proxy "${HTTP_PROXY}"
@@ -89,6 +84,8 @@ ARG CHRUBY_VERSION=
 ARG RUBY_INSTALL_VERSION=
 ARG RUBIES_TARBALL_CACHE_BASE_URL=
 ARG RUBY_TARBALL_SHA256=
+ENV RUBIES_TARBALL_URL \
+"${RUBIES_TARBALL_CACHE_BASE_URL}/${DEB_DIST}/ruby-${RUBY_RELEASE}.tar.xz"
 
 # Create and configure DOCKER_USER
 RUN groupadd -g "${DOCKER_USER_GID}" "${DOCKER_USER}" \
@@ -111,7 +108,7 @@ RUN echo "deb ${DEB_MIRROR_URL} ${DEB_DIST} ${DEB_COMPONENTS}" \
          >> /etc/apt/sources.list \
   && echo "deb ${DEB_MIRROR_URL} ${DEB_DIST}-backports ${DEB_COMPONENTS}" \
          >> /etc/apt/sources.list \
-  && echo "deb ${DEB_SECURITY_MIRROR_URL} ${DEB_DIST}/updates ${DEB_COMPONENTS}" \
+  && echo "deb ${DEB_SECURITY_MIRROR_URL} ${DEB_DIST}-security ${DEB_COMPONENTS}" \
          >> /etc/apt/sources.list \
   && sed -e 's|#\(precedence\s\s*::ffff:0:0/96\s\s*100\).*$|\1|' \
          -ri /etc/gai.conf \
@@ -144,53 +141,14 @@ RUN echo LANG=C.UTF-8 > /etc/default/locale \
   && dpkg-reconfigure -f noninteractive locales
 
 # Install Docker
-RUN echo "deb ${DEB_DOCKER_URL} ${DEB_DIST} stable" \
-         >> /etc/apt/sources.list.d/docker-ce.list \
-  && if [ -n "${HTTP_PROXY}" ] ; then \
-       GPG_HTTP_PROXY="--keyserver-options http-proxy=${HTTP_PROXY}"; \
-     else \
-       GPG_HTTP_PROXY='' ; \
-     fi \
-  && while ! ( \
-       ok=1 ; \
-       for server in $( \
-         shuf -e hkp://ha.pool.sks-keyservers.net:80 \
-                 hkp://ipv4.pool.sks-keyservers.net:80 \
-                 hkp://keyserver.pgp.com:80 \
-                 hkp://p80.sks-keyservers.net:80 \
-                 hkp://pgp.mit.edu:80 \
-                 hkp://pool.sks-keyservers.net:80 \
-                 hkps://ha.pool.sks-keyservers.net \
-                 hkps://ipv4.pool.sks-keyservers.net \
-                 hkps://keyserver.pgp.com \
-                 hkps://pgp.mit.edu \
-                 hkps://pool.sks-keyservers.net \
-       ) ; do \
-         apt-key adv --no-tty \
-                     ${GPG_HTTP_PROXY} \
-                     --keyserver "${server}" \
-                     --recv-keys "${DEB_DOCKER_GPGID}"; \
-         ok=$? ; \
-         if [ $ok -eq 0 ]; then \
-           break ; \
-         fi ; \
-       done ; \
-       if [ $ok -eq 0 ]; then \
-         true ; \
-       else \
-         false ; \
-       fi \
-     ); do \
-       sleep 1; \
-     done \
-  && if [ -n "${HTTP_PROXY}" ]; then \
+RUN if [ -n "${HTTP_PROXY}" ]; then \
        echo "Acquire::http::proxy \"${HTTP_PROXY}\";" \
          > /etc/apt/apt.conf.d/11http-proxy; \
        echo "Acquire::https::proxy \"${HTTP_PROXY}\";" \
          >> /etc/apt/apt.conf.d/11http-proxy; fi \
   && apt-get update \
-  && apt-get install --no-install-recommends -y docker-ce \
-  && apt install --no-install-recommends -y "ansible/${DEB_DIST}-backports" \
+  && apt-get install --no-install-recommends -y docker.io \
+  && apt install --no-install-recommends -y ansible \
   && apt-get -y autoremove \
   && apt-get clean \
   && if [ -f /etc/apt/apt.conf.d/11http-proxy ]; then \
@@ -224,7 +182,7 @@ v${RUBY_INSTALL_VERSION}.tar.gz" && \
 RUN if [ -n "${RUBY_RELEASE}" -a -n "${RUBY_INSTALL_VERSION}" ]; then \
   mkdir -p /opt/rubies && \
   if curl -sL -o "/opt/rubies/ruby-${RUBY_RELEASE}.tar.xz" \
-    "${RUBIES_TARBALL_CACHE_BASE_URL}/ruby-${RUBY_RELEASE}.tar.xz"; then \
+    "${RUBIES_TARBALL_URL}" ; then \
     if [ "x${RUBY_TARBALL_SHA256}" = "x\
 $(sha256sum /opt/rubies/ruby-${RUBY_RELEASE}.tar.xz|cut -f1 -d\ )" ]; then \
       tar --no-same-owner --owner=0 --group=0 \
@@ -239,15 +197,22 @@ $(sha256sum /opt/rubies/ruby-${RUBY_RELEASE}.tar.xz|cut -f1 -d\ )" ]; then \
     /usr/local/bin/ruby-install \
       -r /opt/rubies -c -j"${NB_PROC}" ruby "${RUBY_RELEASE}" ; \
   fi ; \
-  /opt/rubies/ruby-${RUBY_RELEASE}/bin/gem uninstall \
-    -i /opt/rubies/ruby-${RUBY_RELEASE}/lib/ruby/gems/${RUBY_LEVEL}@global \
-    bundler && \
-  /opt/rubies/ruby-${RUBY_RELEASE}/bin/gem install bundler ; \
+  if ! /opt/rubies/ruby-${RUBY_RELEASE}/bin/gem list bundler \
+    --version=${BUNDLER_VERSION} -i > /dev/null; then \
+    /opt/rubies/ruby-${RUBY_RELEASE}/bin/gem uninstall \
+      -i /opt/rubies/ruby-${RUBY_RELEASE}/lib/ruby/gems/${RUBY_LEVEL}@global \
+      bundler && \
+    /opt/rubies/ruby-${RUBY_RELEASE}/bin/gem install bundler \
+      --version=${BUNDLER_VERSION} ; \
+  fi ; \
 fi
 
 # Autoload chruby
 COPY .bash_profile /home/${DOCKER_USER}/.bash_profile
-RUN chown ${DOCKER_USER}:${DOCKER_USER} /home/${DOCKER_USER}/.bashrc
+RUN chown ${DOCKER_USER}:${DOCKER_USER} /home/${DOCKER_USER}/.bash_profile
 
 # Cleanups
 RUN apt-get -y autoremove && apt-get clean && rm -rf /tmp/* /var/tmp/*
+
+# Fix possible "/usr/bin/mkdir: Command not found" on gem builds
+RUN if [ ! -x /usr/bin/mkdir ] ; then ln -s /bin/mkdir /usr/bin/mkdir ; fi

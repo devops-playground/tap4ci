@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 Vagrant.configure(2) do |config|
+  config.vm.provider :lxc do |lxc|
+    lxc.privileged = false
+  end
   config.vm.provision(:shell,
                       privileged: true,
                       path: "#{__dir__}/provision_script.sh",
