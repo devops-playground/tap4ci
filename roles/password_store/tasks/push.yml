@@ -1,9 +1,25 @@
 ---
 - name: Decrypt password store files to be pushed
   set_fact:
-    password_store_pushed: "{{ ( password_store_pushed | default([]) ) + [ ( item | combine( { 'content': ( lookup('passwordstore', item.src + ' returnall=true') ) } ) ) ] }}"
-  with_items: "{{ password_store.push }}"
-  register: password_store_pushed
+    password_store_pushed: |
+      {{
+        ( password_store_pushed | default([]) )
+        + [
+            (
+              item
+              | combine(
+                { 'content':
+                  ( lookup('passwordstore', item.src + ' returnall=true') )
+                }
+              )
+            )
+          ]
+       }}
+  loop: "{{ password_store.push }}"
+
+- debug:
+    var: password_store_pushed
+    verbosity: 1
 
 - name: Push password store files
   copy:
@@ -12,5 +28,5 @@
     owner: "{{ item.owner | default('root') }}"
     group: "{{ item.group | default('root') }}"
     mode: "{{ item.mode | default('0600') }}"
-  with_items: "{{ password_store_pushed }}"
+  loop: "{{ password_store_pushed }}"
 ...

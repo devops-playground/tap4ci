@@ -1,5 +1,15 @@
 # Makefile: make(1) build file.
 
+# Use bash shell
+SHELL := /bin/bash
+
+# Load .env file if present (see sample env.default)
+ENVFILE := $(shell if [ -r .env ]; then echo 'true'; else echo 'false'; fi)
+ifeq ($(ENVFILE),true)
+	include .env
+	export $(shell sed 's/=.*//' .env | egrep -v '^\#')
+endif
+
 # Default task show help
 default: help
 
@@ -9,6 +19,9 @@ default: help
 
 # Inotify wait time in second for auto tests
 AUTO_SLEEP ?= 2
+
+# Adjust Ruby MRI's standard glibc malloc behavior (close to jemalloc)
+MALLOC_MAX_ARENA ?= 2
 
 # Test-Kitchen provider
 KITCHEN_PROVIDER ?= docker
@@ -21,8 +34,8 @@ DOCKER_USER ?= dev
 DOCKER_USER_UID ?= 8888
 DOCKER_USER_GID ?= 8888
 
-# Valid subuid group identifier or name for user namespace restriction
-DOCKER_USERNS_GROUP ?= dock-g
+# Valid subuid user identifier or name for user namespace restriction
+DOCKER_USERNS_USER ?= dock-u
 
 # Get Docker info
 DOCKER_INFO := $(shell docker info | tr "\n" '|')
@@ -30,11 +43,11 @@ DOCKER_INFO := $(shell docker info | tr "\n" '|')
 # Docker registry settings (credential should be set in environment)
 DOCKER_REGISTRY ?= $(shell \
 	echo "$(DOCKER_INFO)" \
-		| tr "\n" '|' \
-		| sed -e 's~^.*|Registry: \(https\?://[^|]*\)|.*$$~\1~g' \
+		| tr '|' "\n" \
+		| awk '/^ *Registry: / { print $$2; }' \
 	)
 DOCKER_REGISTRY_HOST ?= $(shell \
-	echo "${DOCKER_REGISTRY}" \
+	echo "$(DOCKER_REGISTRY)" \
 		| sed -e 's|^https\?://||' -e 's|/.*$$||' \
 	)
 DOCKER_USERNAME ?= dumb
@@ -47,6 +60,9 @@ PROJECT_OWNER ?= ${DOCKER_USERNAME}
 
 # Define working directory inside container
 WORKING_DIR ?= /src/${PROJECT_NAME}
+
+# Define Ruby bundle path inside container
+BUNDLE_PATH := ${WORKING_DIR}/.bundle
 
 # Writable stuff inside container
 WRITABLE_DIRECTORIES := .bundle .kitchen .kitchen_cache_directory
@@ -77,15 +93,17 @@ BUILD_ARGS = \
 	--build-arg "DOCKER_USER=${DOCKER_USER}" \
 	--build-arg "DOCKER_USER_GID=${DOCKER_USER_GID}" \
 	--build-arg "DOCKER_USER_UID=${DOCKER_USER_UID}" \
+	--build-arg "MAKEFLAGS=-j${NB_PROC}" \
 	--build-arg "NB_PROC=${NB_PROC}"
 
 # Docker run environment variables
 ENV_VARS = \
 	--env 'BUNDLE_DISABLE_SHARED_GEMS=true' \
 	--env "BUNDLE_JOBS=${NB_PROC}" \
-	--env "BUNDLE_PATH=${WORKING_DIR}/.bundle" \
+	--env "BUNDLE_PATH=${BUNDLE_PATH}" \
 	--env "KITCHEN_PROVIDER=${KITCHEN_PROVIDER}" \
-	--env "MAKEFLAGS=-j ${NB_PROC}" \
+	--env "MAKEFLAGS=-j${NB_PROC}" \
+	--env "MALLOC_MAX_ARENA=${MALLOC_MAX_ARENA}" \
 	--env container=docker \
 	--env LC_ALL=C.UTF-8
 
@@ -98,8 +116,6 @@ endif
 OVERRIDABLE_BUILD_ARGS := \
 	DEB_COMPONENTS \
 	DEB_DIST \
-	DEB_DOCKER_GPGID \
-	DEB_DOCKER_URL \
 	DEB_MIRROR_URL \
 	DEB_PACKAGES \
 	DEB_SECURITY_MIRROR_URL \
@@ -150,8 +166,8 @@ USER_MODE_ARG := \
 # Check if user namespace is activated
 USERNS ?= $(shell \
 	echo "$(DOCKER_INFO)" \
-		| tr "\n" '|' \
-		| sed -e 's/^.*| userns|.*$$/yes/g' \
+		| tr '|' "\n" \
+		| awk '/^  ?userns$$/ { print "yes" }' \
 	)
 
 # Check if user is root
@@ -244,17 +260,36 @@ endef
 # Define function to check if Dockerfile has changed since last commit / master
 define dockerfile_changed
 	test -n "$$(git diff origin/master -- Dockerfile)" \
-		-o -n "$$(git diff HEAD~1 -- Dockerfile)"
+		-o -n "$$(git diff HEAD~1 -- Dockerfile)" \
+		-o -n "$$(git diff origin/master -- .bash_profile)" \
+		-o -n "$$(git diff HEAD~1 -- .bash_profile)" \
+		-o -n "$$(git diff origin/master -- .ruby-tarball-sha256)" \
+		-o -n "$$(git diff HEAD~1 -- .ruby-tarball-sha256)" \
+		-o -n "$$(git diff origin/master -- .ruby-version)" \
+		-o -n "$$(git diff HEAD~1 -- .ruby-version)"
 endef
 
 # Check Docker daemon experimental features (for build squashing)
 DOCKERD_EXPERIMENTAL := \
 	$(shell docker version --format '{{ .Server.Experimental }}')
 
+BUILD_OPTS :=
+
 ifeq ($(DOCKERD_EXPERIMENTAL),true)
+ifeq ($(CURRENT_GIT_BRANCH),master)
 	BUILD_OPTS := --squash
-else
-	BUILD_OPTS :=
+endif
+endif
+
+# TTY support Docker args
+CIRCLECI ?=
+GITLAB_CI ?=
+TRAVIS ?=
+
+TTY_ARGS :=
+
+ifeq ($(CIRCLECI)$(TRAVIS)$(GITLAB_CI),)
+	TTY_ARGS := -t
 endif
 
 # Handle specific Ruby release if needed
@@ -265,7 +300,7 @@ RUBY_TARBALL_SHA256 := \
 ifneq ($(RUBY_RELEASE),)
 	RUBY_LEVEL := $(shell sed -e 's/\.[0-9]*$$/.0/' ${PWD}/.ruby-version)
 	CHRUBY_VERSION ?= 0.3.9
-	RUBY_INSTALL_VERSION ?= 0.7.0
+	RUBY_INSTALL_VERSION ?= 0.8.5
 	RUBIES_TARBALL_CACHE_BASE_URL ?= http://rubies.free.fr
 
 	RUBY_ROOT := /opt/rubies/ruby-$(RUBY_RELEASE)
@@ -276,13 +311,17 @@ ifneq ($(RUBY_RELEASE),)
 	OLD_PATH := $(PATH)
 
 	GEM_ROOT := $(RUBY_ROOT)/lib/ruby/gems/$(RUBY_LEVEL)
-	GEM_HOME := $(BUNDLE_PATH)/gems
+	GEM_HOME := $(BUNDLE_PATH)/ruby/$(RUBY_LEVEL)
 	GEM_PATH := $(GEM_HOME):$(GEM_ROOT)
 
-	PATH := $(GEM_HOME)/bin:$(RUBY_ROOT)/bin:/usr/local/bin:/usr/bin:/bin
+	RUBY_PATH := $(GEM_HOME)/bin:$(RUBY_ROOT)/bin
+
+	BUNDLER_VERSION := \
+		$(strip $(shell tail -n 1 ${PWD}/Gemfile.lock 2> /dev/null || true))
 
 	CHRUBY_BUILD_ARGS := \
 		CHRUBY_VERSION \
+		BUNDLER_VERSION \
 		RUBIES_TARBALL_CACHE_BASE_URL \
 		RUBY_INSTALL_VERSION \
 		RUBY_LEVEL \
@@ -290,11 +329,12 @@ ifneq ($(RUBY_RELEASE),)
 		RUBY_TARBALL_SHA256
 
 	CHRUBY_ENV_VARS := \
+		BUNDLER_VERSION \
 		GEM_ROOT \
 		GEM_HOME \
 		GEM_PATH \
-		PATH \
 		RUBY_LEVEL \
+		RUBY_PATH \
 		RUBY_RELEASE
 endif
 
@@ -345,7 +385,7 @@ endef
 
 auto: ## Run tests suite continuously on writes
 	@+while true; do \
-		make --no-print-directory test && \
+		$(MAKE) --no-print-directory test && \
 			echo "⇒ \033[1;49;92mauto test done\033[0m, sleeping $(AUTO_SLEEP)s…"; \
 		sleep $(AUTO_SLEEP); \
 		$(call make_inotifywait); \
@@ -357,57 +397,62 @@ autolxc: ## Run LXC test suite continuously on writes
 		GEM_ROOT=$(OLD_GEM_ROOT) \
 		GEM_PATH=$(OLD_GEM_PATH) \
 		PATH=$(OLD_PATH) \
-		make --no-print-directory lxctest && \
+		$(MAKE) --no-print-directory lxctest && \
 		echo "⇒ \033[1;49;92mauto LXC test done\033[0m, sleeping $(AUTO_SLEEP)s…"; \
 		sleep $(AUTO_SLEEP); \
 		$(call make_inotifywait); \
 	done
 
+define sudo
+	cmd="sudo ${1}" && printf "\n\033[31;1m$${cmd}\033[0m\n\n" && $${cmd}
+endef
+
+define add_writable_directories_acls
+	for dir in ${WRITABLE_DIRECTORIES}; do \
+		$(call sudo,setfacl -Rm u:${1}:rwX ${PROJECT_ROOT}/$${dir}) ; \
+	done
+endef
+
+define add_writable_files_acls
+	for file in ${WRITABLE_FILES}; do \
+		$(call sudo,setfacl -m u:${1}:rwX ${PROJECT_ROOT}/$${file}) ; \
+	done
+endef
+
 acl: .acl_build ## Add nested ACLs rights (need sudo)
 .acl_build: ${WRITABLE_DIRECTORIES} ${WRITABLE_FILES}
-	@if [ "$(USERNS)" = 'yes' ]; then \
-		cmd='sudo setfacl -Rm g:$(DOCKER_USERNS_GROUP):rwX /var/run/docker.sock' \
-			&& printf "\n\033[31;1m$${cmd}\033[0m\n\n" \
-			&& $${cmd} ; \
-		if [ "$(TMUX_CONF)" = 'Ok' ]; then \
-			cmd='sudo setfacl -Rm g:$(DOCKER_USERNS_GROUP):r $(HOME)/.tmux.conf' \
-			&& printf "\n\033[31;1m$${cmd}\033[0m\n\n" \
-			&& $${cmd} ; \
-		fi ; \
-	fi
 ifeq ($(USERNS),yes)
-	for dir in ${WRITABLE_DIRECTORIES}; do \
-		args="-Rm g:${DOCKER_USERNS_GROUP}:rwX ${PROJECT_ROOT}/$${dir}" ; \
-		printf "\033[31;1msudo setfacl $${args}\033[0m\n" ; \
-		sudo setfacl $${args} ; \
-	done
-	for file in ${WRITABLE_FILES}; do \
-		args="-m g:${DOCKER_USERNS_GROUP}:rwX ${PROJECT_ROOT}/$${file}" ; \
-		printf "\033[31;1msudo setfacl $${args}\033[0m\n" ; \
-		sudo setfacl $${args} ; \
-	done
+	$(call sudo,setfacl -m u:$(DOCKER_USERNS_USER):rw /var/run/docker.sock) ; \
+	$(call add_writable_directories_acls,$(DOCKER_USERNS_USER))
+	$(call add_writable_files_acls,$(DOCKER_USERNS_USER))
+	if [ -f $(PROJECT_ROOT)/.env ] ; then \
+		$(call sudo,setfacl -m u:$(DOCKER_USERNS_USER):r ${PROJECT_ROOT}/.env) ; \
+	fi
 else
 	for dir in ${WRITABLE_DIRECTORIES}; do \
-		chmod a+rwX -R "${PROJECT_ROOT}/$${dir}" ; \
+		chmod a+rwX -R "${PROJECT_ROOT}/$${dir}" 2> /dev/null; \
 	done ; \
 	for file in ${WRITABLE_FILES}; do \
-		chmod a+rw "${PROJECT_ROOT}/$${file}" ; \
+		chmod a+rw "${PROJECT_ROOT}/$${file}" 2> /dev/null; \
 	done
 endif
 	touch .acl_build
 
 ansible_check: bundle ## Run kitchen converge with Ansible in check mode
-	@$(call docker_run,${WRITABLE_VOLUMES_ARGS} --env=ANSIBLE_CHECK_MODE=1,bundle exec kitchen converge)
+	@$(call docker_run,\
+		-i $(TTY_ARGS) ${WRITABLE_VOLUMES_ARGS} --env=ANSIBLE_CHECK_MODE=1,\
+		bash -l -c "bundle exec kitchen converge")
 
 build: .build ## Build project container
 .build: Dockerfile .bash_profile
-	docker build --rm $(BUILD_OPTS) $(BUILD_ARGS) -t $(DOCKER_BUILD_TAG) \
-		--cache-from $(DOCKER_BUILD_TAG) .
+	DOCKER_BUILDKIT=1 docker build --rm $(BUILD_OPTS) $(BUILD_ARGS) \
+		-t $(DOCKER_BUILD_TAG) --cache-from $(DOCKER_BUILD_TAG) .
 	touch .build
 
 bundle: .bundle_build ## Run bundle for project
 .bundle_build: .bundle Gemfile Gemfile.lock .acl_build .build
-	@$(call docker_run,${WRITABLE_VOLUMES_ARGS},bundle)
+	@$(call docker_run,\
+		-i $(TTY_ARGS) ${WRITABLE_VOLUMES_ARGS},bash -l -c bundle)
 	touch .acl_build
 	touch .bundle_build
 
@@ -450,7 +495,7 @@ githook: ## Install Git pre-commit hook
 
 help: ## Show this help
 	@printf '\033[32mtargets:\033[0m\n'
-	@grep -E '^[a-zA-Z _-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	@grep -E '^[a-zA-Z _-]+:.*?## .*$$' $(filter-out .env,$(MAKEFILE_LIST)) \
 	| sort \
 	| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n",$$1,$$2}'
 
@@ -458,15 +503,18 @@ info: MAKEFLAGS =
 info: .build .acl_build ## Show Docker version and user id
 	@if [ -n "$(DOCKER_SUDO_S)" ]; then \
 		printf "${DOCKER_USER}\n\n" \
-		| $(call docker_run,--interactive,$(DOCKER_SUDO_S) docker info) ; \
+		| $(call docker_run,-i $(TTY_ARGS),$(DOCKER_SUDO_S) docker info) ; \
 	else \
-		$(call docker_run,,$(DOCKER_SUDO_S) docker info) ; \
+		$(call docker_run,-i $(TTY_ARGS),$(DOCKER_SUDO_S) docker info) ; \
 	fi
-	@$(call docker_run,,id)
-	@$(call docker_run,,ruby --version)
+	@$(call docker_run,-i $(TTY_ARGS),id)
+	@$(call docker_run,-i $(TTY_ARGS),bash -l -c "ruby --version")
+	@$(call docker_run,-i $(TTY_ARGS) $(WRITABLE_VOLUMES_ARGS),\
+		bash -l -c "bundle --version")
 
 kitchen: bundle ## Run kitchen tests
-	@$(call docker_run,${WRITABLE_VOLUMES_ARGS},bundle exec kitchen test)
+	@$(call docker_run,-i $(TTY_ARGS) ${WRITABLE_VOLUMES_ARGS},\
+		bash -l -c "bundle exec kitchen test")
 
 login: ## Login to Docker registry
 	@echo "login to registry $(DOCKER_USERNAME) @ ${DOCKER_REGISTRY}"
@@ -487,10 +535,12 @@ pull: ## Run 'docker pull' with image
 	touch .build
 
 pull_or_build_if_changed:
-	+if $(call dockerfile_changed); then \
-		make build; \
+	@+if $(call dockerfile_changed); then \
+		$(MAKE) --no-print-directory build; \
 	else \
-		( make login && make pull ) || make build ; \
+		( $(MAKE) --no-print-directory login \
+			&& $(MAKE) --no-print-directory pull ) \
+		|| $(MAKE) --no-print-directory build ; \
 	fi
 
 push: login .build ## Run 'docker push' with image
@@ -502,10 +552,10 @@ pull_then_push_to_latest: login
 		-a "x${CURRENT_GIT_BRANCH}" != 'xmaster' ]; then \
 			exit 0 ; \
 	fi
-	@make --no-print-directory pull
+	@$(MAKE) --no-print-directory pull
 	docker tag "$(DOCKER_REGISTRY_HOST)/${DOCKER_BUILD_TAG}" \
 		"${DOCKER_BUILD_TAG_BASE}:latest"
-	@DOCKER_BUILD_TAG="${DOCKER_BUILD_TAG_BASE}" make --no-print-directory push
+	@DOCKER_BUILD_TAG="${DOCKER_BUILD_TAG_BASE}" $(MAKE) --no-print-directory push
 
 rmi: FLAG = build
 rmi: clear-flags ## Remove project container
@@ -513,19 +563,21 @@ rmi: clear-flags ## Remove project container
 
 rebuild-all: MAKEFLAGS =
 rebuild-all: ## Clobber all, build and run test
-	@make --no-print-directory clobber
-	@make --no-print-directory test
+	@$(MAKE) --no-print-directory clobber
+	@$(MAKE) --no-print-directory test
 
 test-dind: .build .acl_build ## Run 'docker run hello-world' within image
 	@if [ -n "$(DOCKER_SUDO_S)" ]; then \
 		printf "${DOCKER_USER}\n\n" \
-		| $(call docker_run,-i,$(DOCKER_SUDO_S) docker run hello-world) ; \
+		| $(call docker_run,\
+			-i $(TTY_ARGS),$(DOCKER_SUDO_S) docker run hello-world) ; \
 	else \
-		$(call docker_run,,$(DOCKER_SUDO_S) docker run hello-world) ; \
+		$(call docker_run,\
+			-i $(TTY_ARGS),$(DOCKER_SUDO_S) docker run hello-world) ; \
 	fi
 
 test: MAKEFLAGS =
-test: .build .acl_build ## Test (CI)
+test: .bundle_build .build .acl_build ## Test (CI)
 	@+$(call make_notify,info,'Docker info') && \
 	$(call make_notify,test-dind,'Docker-in-Docker') && \
 	$(call make_notify,bundle,'Bundle') && \
@@ -555,4 +607,5 @@ lxctest: ## Test (CI) with LXC (without Docker-in-Docker)
 		bundle exec kitchen test,'LXC Kitchen test')
 
 usershell: .bundle_build .build .acl_build ## Run user shell
-	@$(call docker_run,-it --env SHELL=/bin/bash $(RC_ENV_VARS),/bin/bash --login)
+	@$(call docker_run,--env SHELL=/bin/bash $(RC_ENV_VARS) \
+		-i $(TTY_ARGS) $(WRITABLE_VOLUMES_ARGS),/bin/bash -l)

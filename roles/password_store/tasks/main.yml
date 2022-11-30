@@ -5,6 +5,7 @@
 
 - debug:
     var: password_store_configured
+    verbosity: 1
   when: password_store_configured
 
 - include_tasks: decrypt.yml
