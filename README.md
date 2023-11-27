@@ -83,7 +83,7 @@ targets:
 | `NB_PROC` | `$(nproc)` (Linux) or `sysctl -n hw.ncpu` (OsX) | Y | Y | Processor count |
 | `PROJECT_NAME` | `$(basename $(pwd))` | N | Y (`hostname`) | Container build tag project name part (`user_name/project_name:branch`) / container hostname |
 | `PROJECT_OWNER` | `${DOCKER_USERNAME}` | N | Y | Container build tag user name part (`user_name/project_name:branch`)  |
-| `RUBY_INSTALL_VERSION` | `0.7.0` | Y | N | [ruby-install](https://github.com/postmodern/ruby-install) release |
+| `RUBY_INSTALL_VERSION` | `0.8.3` | Y | N | [ruby-install](https://github.com/postmodern/ruby-install) release |
 | `TERM` | `${TERM}` | N | Y | Terminal name |
 | `TRAVIS` | | N | Y (if defined) | Travis CI flag |
 | `USERNS` | from `docker info` | N | Y (if defined) | Docker user namespace isolation flag |

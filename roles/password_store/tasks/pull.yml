@@ -38,6 +38,7 @@
 
 - debug:
     var: password_store_pulled_with_original_content
+    verbosity: 1
 
 - name: Store remote password store files to be pull in password-store
   local_action:
